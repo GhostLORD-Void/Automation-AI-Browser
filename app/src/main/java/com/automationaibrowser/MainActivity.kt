@@ -376,12 +376,43 @@ class MainActivity : Activity() {
                                     result.onSuccess { plan ->
                                         AlertDialog.Builder(this)
                                             .setTitle("Review AI plan")
-                                            .setMessage(plan.optJSONArray("steps")?.let { steps ->
-                                                (0 until steps.length()).joinToString("\n") { i ->
-                                                    val step = steps.optJSONObject(i)
-                                                    "${i + 1}. ${step?.optString("action") ?: "unknown action"}"
+                                            .setMessage(buildString {
+                                                val steps = plan.optJSONArray("steps")
+                                                if (steps == null || steps.length() == 0) {
+                                                    append("No steps returned")
+                                                } else {
+                                                    for (i in 0 until steps.length()) {
+                                                        val step = steps.optJSONObject(i) ?: continue
+                                                        val action = step.optString("action", "unknown action")
+                                                        append("${i + 1}. $action")
+                                                        when (action) {
+                                                            "navigate" -> append("\\n   URL: ${step.optString("url").take(180)}")
+                                                            "search" -> append("\\n   Query: ${step.optString("query").take(180)}")
+                                                            "click", "scroll", "extract", "wait_for", "press_enter", "submit" ->
+                                                                append("\\n   Target: ${step.optString("selector").take(140)}")
+                                                            "type" -> {
+                                                                append("\\n   Target: ${step.optString("selector").take(140)}")
+                                                                append("\\n   Text: ${step.optString("text").take(140)}")
+                                                            }
+                                                            "wait" -> append("\\n   Delay: ${step.optLong("milliseconds", 500L)} ms")
+                                                            else -> Unit
+                                                        }
+                                                        if (action == "wait_for") {
+                                                            append("\\n   Timeout: ${step.optLong("timeoutMs", 10_000L)} ms")
+                                                        }
+                                                        append("\\n\\n")
+                                                    }
                                                 }
-                                            } ?: "No steps returned")
+                                                val verification = plan.optJSONObject("verification")
+                                                if (verification != null) {
+                                                    append("Final verification")
+                                                    append("\\n   Element: ${verification.optString("selector").take(140)}")
+                                                    listOf("textContains", "urlContains", "titleContains").forEach { field ->
+                                                        val expected = verification.optString(field)
+                                                        if (expected.isNotBlank()) append("\\n   $field: ${expected.take(140)}")
+                                                    }
+                                                }
+                                            })
                                             .setNegativeButton("Cancel", null)
                                             .setPositiveButton("Execute") { _, _ -> agentEngine?.execute(plan) }
                                             .show()
