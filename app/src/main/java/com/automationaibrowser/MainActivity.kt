@@ -386,30 +386,30 @@ class MainActivity : Activity() {
                                                         val action = step.optString("action", "unknown action")
                                                         append("${i + 1}. $action")
                                                         when (action) {
-                                                            "navigate" -> append("\\n   URL: ${step.optString("url").take(180)}")
-                                                            "search" -> append("\\n   Query: ${step.optString("query").take(180)}")
+                                                            "navigate" -> append("\n   URL: ${step.optString("url").take(180)}")
+                                                            "search" -> append("\n   Query: ${step.optString("query").take(180)}")
                                                             "click", "scroll", "extract", "wait_for", "press_enter", "submit" ->
-                                                                append("\\n   Target: ${step.optString("selector").take(140)}")
+                                                                append("\n   Target: ${step.optString("selector").take(140)}")
                                                             "type" -> {
-                                                                append("\\n   Target: ${step.optString("selector").take(140)}")
-                                                                append("\\n   Text: ${step.optString("text").take(140)}")
+                                                                append("\n   Target: ${step.optString("selector").take(140)}")
+                                                                append("\n   Text: ${step.optString("text").take(140)}")
                                                             }
-                                                            "wait" -> append("\\n   Delay: ${step.optLong("milliseconds", 500L)} ms")
+                                                            "wait" -> append("\n   Delay: ${step.optLong("milliseconds", 500L)} ms")
                                                             else -> Unit
                                                         }
                                                         if (action == "wait_for") {
-                                                            append("\\n   Timeout: ${step.optLong("timeoutMs", 10_000L)} ms")
+                                                            append("\n   Timeout: ${step.optLong("timeoutMs", 10_000L)} ms")
                                                         }
-                                                        append("\\n\\n")
+                                                        append("\n\n")
                                                     }
                                                 }
                                                 val verification = plan.optJSONObject("verification")
                                                 if (verification != null) {
                                                     append("Final verification")
-                                                    append("\\n   Element: ${verification.optString("selector").take(140)}")
+                                                    append("\n   Element: ${verification.optString("selector").take(140)}")
                                                     listOf("textContains", "urlContains", "titleContains").forEach { field ->
                                                         val expected = verification.optString(field)
-                                                        if (expected.isNotBlank()) append("\\n   $field: ${expected.take(140)}")
+                                                        if (expected.isNotBlank()) append("\n   $field: ${expected.take(140)}")
                                                     }
                                                 }
                                             })
