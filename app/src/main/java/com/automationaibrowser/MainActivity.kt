@@ -49,6 +49,8 @@ class MainActivity : Activity() {
     private lateinit var reloadButton: LinearLayout
     private lateinit var homeButton: LinearLayout
     private lateinit var bookmarkButton: LinearLayout
+    private lateinit var agentButton: TextView
+    private var agentEngine: AgentActionEngine? = null
 
     private val pageBg = Color.rgb(11, 15, 24)
     private val panelBg = Color.rgb(20, 26, 39)
@@ -119,6 +121,19 @@ class MainActivity : Activity() {
             setOnClickListener { showSavedItems("history") }
         }
         header.addView(historyButton, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
+            marginEnd = dp(8)
+        })
+
+        agentButton = TextView(this).apply {
+            text = "AI"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = rounded(accent, 14)
+            contentDescription = "Run browser task"
+            setOnClickListener { showAgentDialog() }
+        }
+        header.addView(agentButton, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
             marginEnd = dp(8)
         })
 
@@ -254,8 +269,83 @@ class MainActivity : Activity() {
         ))
 
         setContentView(root)
+        agentEngine = AgentActionEngine(
+            webView = { currentTab()?.webView },
+            onStatus = { _ ->
+                runOnUiThread {
+                    if (::agentButton.isInitialized) agentButton.text =
+                        if (agentEngine?.isRunning() == true) "••" else "AI"
+                }
+            },
+            onFinished = { success, summary ->
+                runOnUiThread {
+                    if (::agentButton.isInitialized) agentButton.text = "AI"
+                    AlertDialog.Builder(this)
+                        .setTitle(if (success) "Task verified" else "Task stopped")
+                        .setMessage(summary)
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        )
         createTab(null, true)
         refreshToolbar()
+    }
+
+    private fun showAgentDialog() {
+        val taskInput = EditText(this).apply {
+            hint = "Example: search for Android WebView security"
+            setTextColor(primaryText)
+            setHintTextColor(mutedText)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(inputBg, 12)
+            minLines = 2
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(taskInput, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(TextView(this@MainActivity).apply {
+                text = "Basic task mode: opens a URL or searches the web, then checks that the page loaded. An AI planning service is not connected yet."
+                textSize = 12f
+                setTextColor(mutedText)
+                setPadding(dp(2), dp(10), dp(2), dp(4))
+            })
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Run browser task")
+            .setView(panel)
+            .setPositiveButton("Run") { _, _ ->
+                val task = taskInput.text.toString().trim()
+                if (task.isBlank()) {
+                    Toast.makeText(this, "Enter a task first", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val target = when {
+                    task.startsWith("https://", true) || task.startsWith("http://", true) -> task
+                    task.matches(Regex("(?i)^(open|visit|go to)\\s+https?://.*")) ->
+                        task.replaceFirst(Regex("(?i)^(open|visit|go to)\\s+"), "")
+                    task.matches(Regex("(?i)^(open|visit|go to)\\s+[a-z0-9.-]+\\.[a-z]{2,}(/.*)?$")) ->
+                        "https://" + task.replaceFirst(Regex("(?i)^(open|visit|go to)\\s+"), "")
+                    else -> ""
+                }
+                val plan = if (target.isNotBlank()) {
+                    JSONObject()
+                        .put("steps", JSONArray().put(JSONObject().put("action", "navigate").put("url", target)))
+                        .put("verification", JSONObject().put("selector", "body"))
+                } else {
+                    val query = task.replaceFirst(Regex("(?i)^(search for|search|find)\\s+"), "").trim()
+                    JSONObject()
+                        .put("steps", JSONArray().put(JSONObject().put("action", "search").put("query", query)))
+                        .put("verification", JSONObject().put("selector", "body"))
+                }
+                agentEngine?.execute(plan)
+            }
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Stop") { _, _ -> agentEngine?.cancel() }
+            .show()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
