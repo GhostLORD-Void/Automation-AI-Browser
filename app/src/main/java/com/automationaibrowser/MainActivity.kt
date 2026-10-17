@@ -293,6 +293,7 @@ class MainActivity : Activity() {
     }
 
     private fun showAgentDialog() {
+        val prefs = getSharedPreferences("nova_browser", MODE_PRIVATE)
         val taskInput = EditText(this).apply {
             hint = "Example: search for Android WebView security"
             setTextColor(primaryText)
@@ -301,6 +302,15 @@ class MainActivity : Activity() {
             background = rounded(inputBg, 12)
             minLines = 2
         }
+        val endpointInput = EditText(this).apply {
+            hint = "Optional HTTPS AI planner endpoint"
+            setText(prefs.getString("agent_planner_endpoint", "").orEmpty())
+            setTextColor(primaryText)
+            setHintTextColor(mutedText)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(inputBg, 12)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), 0)
@@ -308,7 +318,16 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ))
             addView(TextView(this@MainActivity).apply {
-                text = "Basic task mode: opens a URL or searches the web, then checks that the page loaded. An AI planning service is not connected yet."
+                text = "Task instructions"
+                textSize = 11f
+                setTextColor(mutedText)
+                setPadding(dp(2), dp(8), dp(2), dp(4))
+            })
+            addView(endpointInput, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(TextView(this@MainActivity).apply {
+                text = "Leave endpoint blank for local URL/search mode. Add an HTTPS planner-proxy URL for AI-generated multi-step plans. Keep model API keys on the server, not in this app."
                 textSize = 12f
                 setTextColor(mutedText)
                 setPadding(dp(2), dp(10), dp(2), dp(4))
@@ -317,35 +336,73 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Run browser task")
             .setView(panel)
-            .setPositiveButton("Run") { _, _ ->
-                val task = taskInput.text.toString().trim()
-                if (task.isBlank()) {
-                    Toast.makeText(this, "Enter a task first", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                val target = when {
-                    task.startsWith("https://", true) || task.startsWith("http://", true) -> task
-                    task.matches(Regex("(?i)^(open|visit|go to)\\s+https?://.*")) ->
-                        task.replaceFirst(Regex("(?i)^(open|visit|go to)\\s+"), "")
-                    task.matches(Regex("(?i)^(open|visit|go to)\\s+[a-z0-9.-]+\\.[a-z]{2,}(/.*)?$")) ->
-                        "https://" + task.replaceFirst(Regex("(?i)^(open|visit|go to)\\s+"), "")
-                    else -> ""
-                }
-                val plan = if (target.isNotBlank()) {
-                    JSONObject()
-                        .put("steps", JSONArray().put(JSONObject().put("action", "navigate").put("url", target)))
-                        .put("verification", JSONObject().put("selector", "body"))
-                } else {
-                    val query = task.replaceFirst(Regex("(?i)^(search for|search|find)\\s+"), "").trim()
-                    JSONObject()
-                        .put("steps", JSONArray().put(JSONObject().put("action", "search").put("query", query)))
-                        .put("verification", JSONObject().put("selector", "body"))
-                }
-                agentEngine?.execute(plan)
-            }
+            .setPositiveButton("Run", null)
             .setNegativeButton("Cancel", null)
-            .setNeutralButton("Stop") { _, _ -> agentEngine?.cancel() }
-            .show()
+            .setNeutralButton("Stop", null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val task = taskInput.text.toString().trim()
+                        val endpoint = endpointInput.text.toString().trim()
+                        if (task.isBlank()) {
+                            taskInput.error = "Enter a task"
+                            return@setOnClickListener
+                        }
+                        if (endpoint.isNotBlank() && !endpoint.startsWith("https://", true)) {
+                            endpointInput.error = "Planner endpoint must use HTTPS"
+                            return@setOnClickListener
+                        }
+                        prefs.edit().putString("agent_planner_endpoint", endpoint).apply()
+                        dialog.dismiss()
+                        if (endpoint.isBlank()) {
+                            val plan = runCatching { AgentPlanner.localPlan(task) }.getOrElse {
+                                Toast.makeText(this, it.message ?: "Could not plan task", Toast.LENGTH_LONG).show()
+                                return@setOnClickListener
+                            }
+                            Toast.makeText(this, "Running local task plan", Toast.LENGTH_SHORT).show()
+                            agentEngine?.execute(plan)
+                        } else {
+                            agentButton.text = "…"
+                            Toast.makeText(this, "Asking planner to create a task plan…", Toast.LENGTH_SHORT).show()
+                            val tab = currentTab()
+                            AgentPlanner.requestPlan(
+                                endpoint = endpoint,
+                                task = task,
+                                currentUrl = tab?.url.orEmpty(),
+                                pageTitle = tab?.title.orEmpty()
+                            ) { result ->
+                                runOnUiThread {
+                                    agentButton.text = "AI"
+                                    result.onSuccess { plan ->
+                                        AlertDialog.Builder(this)
+                                            .setTitle("Review AI plan")
+                                            .setMessage(plan.optJSONArray("steps")?.let { steps ->
+                                                (0 until steps.length()).joinToString("\n") { i ->
+                                                    val step = steps.optJSONObject(i)
+                                                    "${i + 1}. ${step?.optString("action") ?: "unknown action"}"
+                                                }
+                                            } ?: "No steps returned")
+                                            .setNegativeButton("Cancel", null)
+                                            .setPositiveButton("Execute") { _, _ -> agentEngine?.execute(plan) }
+                                            .show()
+                                    }.onFailure { error ->
+                                        AlertDialog.Builder(this)
+                                            .setTitle("Planner error")
+                                            .setMessage(error.message ?: "Could not create a plan")
+                                            .setPositiveButton("OK", null)
+                                            .show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                        agentEngine?.cancel()
+                        dialog.dismiss()
+                    }
+                }
+                dialog.show()
+            }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
