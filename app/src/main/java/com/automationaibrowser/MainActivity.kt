@@ -44,7 +44,7 @@ class MainActivity : Activity() {
         }
         addressBar = EditText(this).apply {
             hint = "Enter URL or search"
-            singleLine = true
+            setSingleLine(true)
             textSize = 16f
             setTextColor(Color.WHITE)
             setHintTextColor(Color.LTGRAY)
