@@ -412,12 +412,14 @@ class MainActivity : Activity() {
             setOnClickListener { action() }
             contentDescription = label
         }
-        item.addView(TextView(this).apply {
+        val symbolView = TextView(this).apply {
             text = symbol
             textSize = 23f
             gravity = Gravity.CENTER
             setTextColor(if (label == "Save") accent else primaryText)
-        }, LinearLayout.LayoutParams(
+            if (label == "Save") tag = "bookmark-symbol"
+        }
+        item.addView(symbolView, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, dp(29)
         ))
         item.addView(TextView(this).apply {
