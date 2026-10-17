@@ -23,6 +23,7 @@ internal class AgentActionEngine(
     private var running = false
     private var generation = 0
     private var steps = JSONArray()
+    private var currentPlan: JSONObject? = null
     private var index = 0
     private val maxSteps = 20
     private val maxWaitMs = 8_000L
@@ -63,6 +64,7 @@ internal class AgentActionEngine(
         }
 
         steps = proposed
+        currentPlan = plan
         index = 0
         running = true
         generation++
@@ -218,18 +220,40 @@ internal class AgentActionEngine(
     }
 
     private fun verify(runId: Int) {
-        val verification = try {
-            // Verification is required in the plan schema. Never treat action dispatch alone
-            // as proof of success; read a concrete page condition and report it to the caller.
-            val selector = steps.optJSONObject(steps.length() - 1)?.optString("verifySelector").orEmpty()
-            selector
-        } catch (_: Exception) {
-            ""
+        val plan = currentPlan
+        val verification = plan?.optJSONObject("verification")
+        val selector = verification?.optString("selector").orEmpty().trim()
+        if (selector.isEmpty() || selector.length > 300) {
+            finish(runId, false, "Cannot verify completion: plan must provide a valid verification selector")
+            return
         }
-        if (verification == "__invalid__") {
-            finish(runId, false, "Verification failed")
-        } else {
-            finish(runId, true, "All planned browser actions ran. Confirm the final page state before reporting task completion.")
+        val selectorJson = JSONObject.quote(selector)
+        val script = """
+            (() => {
+              const e = document.querySelector($selectorJson);
+              return JSON.stringify({ok: !!e, text: e ? (e.innerText || e.textContent || '').slice(0,2000) : ''});
+            })()
+        """.trimIndent()
+        val browser = webView()
+        if (browser == null) {
+            finish(runId, false, "Cannot verify completion: browser tab is unavailable")
+            return
+        }
+        browser.post {
+            if (!running || runId != generation) return@post
+            browser.evaluateJavascript(script) { raw ->
+                if (!running || runId != generation) return@evaluateJavascript
+                val result = try {
+                    JSONObject(raw?.let { org.json.JSONTokener(it).nextValue() as? String ?: it } ?: "{}")
+                } catch (_: Exception) {
+                    JSONObject().put("ok", false)
+                }
+                if (!result.optBoolean("ok", false)) {
+                    finish(runId, false, "Final verification failed: expected page element was not found")
+                } else {
+                    finish(runId, true, "Final page condition verified: " + result.optString("text").take(500))
+                }
+            }
         }
     }
 
