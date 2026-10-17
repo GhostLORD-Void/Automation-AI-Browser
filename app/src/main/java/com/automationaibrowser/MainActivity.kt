@@ -40,6 +40,7 @@ class MainActivity : Activity() {
     private var activeTabIndex = 0
 
     private lateinit var addressBar: EditText
+    private lateinit var addressBookmarkButton: TextView
     private lateinit var webContainer: LinearLayout
     private lateinit var progressBar: ProgressBar
     private lateinit var tabCountButton: TextView
@@ -174,6 +175,19 @@ class MainActivity : Activity() {
             setOnClickListener { navigate(addressBar.text.toString()) }
         }
         addressRow.addView(goButton, LinearLayout.LayoutParams(dp(42), dp(40)))
+
+        addressBookmarkButton = TextView(this).apply {
+            text = "☆"
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setTextColor(mutedText)
+            background = rounded(panelBg, 13)
+            contentDescription = "Save or remove bookmark"
+            setOnClickListener { toggleBookmark() }
+        }
+        addressRow.addView(addressBookmarkButton, LinearLayout.LayoutParams(dp(38), dp(40)).apply {
+            marginStart = dp(4)
+        })
         root.addView(addressRow)
 
         addressBar.setOnEditorActionListener { _, actionId, _ ->
@@ -229,8 +243,8 @@ class MainActivity : Activity() {
         homeButton = toolbarItem("⌂", "Home") {
             currentTab()?.let { loadHome(it.webView) }
         }
-        bookmarkButton = toolbarItem("☆", "Save") {
-            toggleBookmark()
+        bookmarkButton = toolbarItem("☆", "Bookmarks") {
+            showSavedItems("bookmarks")
         }
         listOf(backButton, forwardButton, reloadButton, homeButton, bookmarkButton).forEach {
             toolbar.addView(it, LinearLayout.LayoutParams(0, dp(52), 1f))
@@ -438,7 +452,8 @@ class MainActivity : Activity() {
         backButton.alpha = if (tab.webView.canGoBack()) 1f else 0.4f
         forwardButton.alpha = if (tab.webView.canGoForward()) 1f else 0.4f
         val isSaved = records("bookmarks").any { it.second == tab.url && tab.url.isNotBlank() }
-        bookmarkButton.findViewWithTag<TextView>("bookmark-symbol")?.text = if (isSaved) "★" else "☆"
+        addressBookmarkButton.text = if (isSaved) "★" else "☆"
+        addressBookmarkButton.setTextColor(if (isSaved) accent else mutedText)
         updateTabCount()
     }
 
@@ -617,6 +632,7 @@ class MainActivity : Activity() {
                 .card { text-decoration: none; color: inherit; display: flex; align-items: center; gap: 13px; padding: 15px; min-height: 78px; background: #141a27; border: 1px solid #242e42; border-radius: 18px; transition: border-color .15s, transform .15s; }
                 .card:active { border-color: #8173ff; transform: scale(.985); }
                 .symbol { width: 39px; height: 39px; flex: 0 0 39px; display: grid; place-items: center; border-radius: 13px; font-size: 19px; font-weight: 700; background: #262445; color: #b5aaff; }
+                .info { min-width: 0; flex: 1; }
                 .card:nth-child(2) .symbol { background: #3a2028; color: #ff9aab; }
                 .card:nth-child(3) .symbol { background: #18352f; color: #86e9c6; }
                 .card:nth-child(4) .symbol { background: #233047; color: #9bc4ff; }
@@ -635,12 +651,12 @@ class MainActivity : Activity() {
                 <p class="intro">A focused browser built for your everyday web. Search, explore, and keep the pages you need close at hand.</p>
                 <p class="section-label">Quick launch</p>
                 <div class="grid">
-                  <a class="card" href="https://duckduckgo.com/"><span class="symbol">⌕</span><span><div class="name">Search</div><div class="desc">Find it on the web</div></span><span class="arrow">↗</span></a>
-                  <a class="card" href="https://www.youtube.com/"><span class="symbol">▶</span><span><div class="name">YouTube</div><div class="desc">Videos and creators</div></span><span class="arrow">↗</span></a>
-                  <a class="card" href="https://www.wikipedia.org/"><span class="symbol">W</span><span><div class="name">Wikipedia</div><div class="desc">Knowledge library</div></span><span class="arrow">↗</span></a>
-                  <a class="card" href="https://github.com/"><span class="symbol">⌘</span><span><div class="name">GitHub</div><div class="desc">Build something great</div></span><span class="arrow">↗</span></a>
-                  <a class="card" href="https://news.ycombinator.com/"><span class="symbol">Y</span><span><div class="name">Tech news</div><div class="desc">Ideas from the community</div></span><span class="arrow">↗</span></a>
-                  <a class="card" href="https://www.google.com/"><span class="symbol">G</span><span><div class="name">Google</div><div class="desc">Classic web search</div></span><span class="arrow">↗</span></a>
+                  <a class="card" href="https://duckduckgo.com/"><span class="symbol">⌕</span><div class="info"><div class="name">Search</div><div class="desc">Find it on the web</div></div><span class="arrow">↗</span></a>
+                  <a class="card" href="https://www.youtube.com/"><span class="symbol">▶</span><div class="info"><div class="name">YouTube</div><div class="desc">Videos and creators</div></div><span class="arrow">↗</span></a>
+                  <a class="card" href="https://www.wikipedia.org/"><span class="symbol">W</span><div class="info"><div class="name">Wikipedia</div><div class="desc">Knowledge library</div></div><span class="arrow">↗</span></a>
+                  <a class="card" href="https://github.com/"><span class="symbol">⌘</span><div class="info"><div class="name">GitHub</div><div class="desc">Build something great</div></div><span class="arrow">↗</span></a>
+                  <a class="card" href="https://news.ycombinator.com/"><span class="symbol">Y</span><div class="info"><div class="name">Tech news</div><div class="desc">Ideas from the community</div></div><span class="arrow">↗</span></a>
+                  <a class="card" href="https://www.google.com/"><span class="symbol">G</span><div class="info"><div class="name">Google</div><div class="desc">Classic web search</div></div><span class="arrow">↗</span></a>
                 </div>
                 <div class="foot">Your bookmarks and recent pages are saved locally on this device. AI-powered features will be added when a secure AI service is configured.</div>
               </main>
