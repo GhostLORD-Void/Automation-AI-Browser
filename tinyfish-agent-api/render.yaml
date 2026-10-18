@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: tinyfish-browser-core-api
+    runtime: docker
+    dockerContext: ./tinyfish-agent-api
+    dockerfilePath: ./tinyfish-agent-api/Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: CORS_ORIGINS
+        value: https://ghostlord-void.github.io
