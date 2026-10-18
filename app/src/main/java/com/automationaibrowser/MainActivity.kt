@@ -133,6 +133,21 @@ class MainActivity : Activity() {
             setOnClickListener { showTabsDialog() }
         }
         header.addView(tabCountButton, LinearLayout.LayoutParams(dp(62), dp(42)))
+
+        val liveAgentButton = TextView(this).apply {
+            text = "LIVE"
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(8, 22, 18))
+            background = rounded(green, 12)
+            contentDescription = "Open real website extraction agent"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, LiveAgentActivity::class.java))
+            }
+        }
+        header.addView(liveAgentButton, LinearLayout.LayoutParams(dp(48), dp(42)).apply {
+            marginStart = dp(8)
+        })
         root.addView(header)
 
         val addressRow = LinearLayout(this).apply {
