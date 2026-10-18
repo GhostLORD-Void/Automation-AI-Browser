@@ -630,7 +630,8 @@ class MainActivity : Activity() {
                     } else if (!url.isNullOrBlank()) {
                         tab.url = url
                         if (tab.title.isBlank() || tab.title == "New tab") tab.title = url
-                        saveHistory(tab.title, url)                        if (tab === currentTab()) addressBar.setText(url)
+                        saveHistory(tab.title, url)
+                        if (tab === currentTab()) addressBar.setText(url)
                     }
                     refreshToolbar()
                 }
@@ -879,7 +880,8 @@ class MainActivity : Activity() {
         tab.webView.stopLoading()
         tab.webView.loadUrl("about:blank")
         tab.webView.clearHistory()
-        tab.webView.removeAllViews()        tab.webView.destroy()
+        tab.webView.removeAllViews()
+        tab.webView.destroy()
         if (activeTabIndex >= tabs.size) activeTabIndex = tabs.lastIndex
         showActiveTab()
     }
