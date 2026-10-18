@@ -3,7 +3,6 @@ package com.automationaibrowser
 import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
-import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
@@ -91,7 +90,7 @@ class LiveAgentActivity : Activity() {
             setTextColor(fg)
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setBackgroundColor(panel)
-            textIsSelectable = true
+            setTextIsSelectable(true)
         }
         val scroll = ScrollView(this).apply { addView(output) }
         root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -140,7 +139,7 @@ class LiveAgentActivity : Activity() {
         textSize = 14f
         setPadding(dp(12), dp(12), dp(12), dp(12))
         setBackgroundColor(panel)
-        singleLine = true
+        setSingleLine(true)
     }
 
     private fun params() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
