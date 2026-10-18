@@ -40,6 +40,7 @@ class MainActivity : Activity() {
     private var activeTabIndex = 0
 
     private lateinit var addressBar: EditText
+    private lateinit var agentCommandInput: EditText
     private lateinit var addressBookmarkButton: TextView
     private lateinit var webContainer: LinearLayout
     private lateinit var progressBar: ProgressBar
@@ -49,6 +50,8 @@ class MainActivity : Activity() {
     private lateinit var reloadButton: LinearLayout
     private lateinit var homeButton: LinearLayout
     private lateinit var bookmarkButton: LinearLayout
+    private lateinit var agentButton: TextView
+    private var agentEngine: AgentActionEngine? = null
 
     private val pageBg = Color.rgb(11, 15, 24)
     private val panelBg = Color.rgb(20, 26, 39)
@@ -122,6 +125,19 @@ class MainActivity : Activity() {
             marginEnd = dp(8)
         })
 
+        agentButton = TextView(this).apply {
+            text = "AI"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = rounded(accent, 14)
+            contentDescription = "Run browser task"
+            setOnClickListener { showAgentDialog() }
+        }
+        header.addView(agentButton, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
+            marginEnd = dp(8)
+        })
+
         tabCountButton = TextView(this).apply {
             text = "▣ 1"
             textSize = 13f
@@ -190,6 +206,61 @@ class MainActivity : Activity() {
         })
         root.addView(addressRow)
 
+        // Always-visible AI command composer so agent tasks are discoverable without opening a dialog.
+        val agentComposer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(panelBg, 16, Color.rgb(42, 52, 72))
+            setPadding(dp(10), dp(3), dp(4), dp(3))
+        }
+        agentCommandInput = EditText(this).apply {
+            hint = "Ask AI to browse or complete a task…"
+            textSize = 13f
+            setSingleLine(true)
+            imeOptions = EditorInfo.IME_ACTION_GO
+            setTextColor(primaryText)
+            setHintTextColor(mutedText)
+            setPadding(dp(6), 0, dp(4), 0)
+            background = null
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        agentComposer.addView(agentCommandInput, LinearLayout.LayoutParams(0, dp(46), 1f))
+        val runAgentButton = TextView(this).apply {
+            text = "➤"
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            background = rounded(accent, 13)
+            contentDescription = "Run AI browser task"
+            setOnClickListener {
+                val task = agentCommandInput.text.toString().trim()
+                if (task.isBlank()) {
+                    agentCommandInput.error = "Enter a browser task"
+                } else {
+                    agentCommandInput.text.clear()
+                    submitAgentTask(task)
+                }
+            }
+        }
+        agentComposer.addView(runAgentButton, LinearLayout.LayoutParams(dp(44), dp(40)))
+        root.addView(agentComposer, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+        ).apply { topMargin = dp(8) })
+
+        agentCommandInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE) {
+                val task = agentCommandInput.text.toString().trim()
+                if (task.isNotBlank()) {
+                    agentCommandInput.text.clear()
+                    submitAgentTask(task)
+                } else {
+                    agentCommandInput.error = "Enter a browser task"
+                }
+                true
+            } else false
+        }
+
         addressBar.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE) {
                 navigate(addressBar.text.toString())
@@ -232,8 +303,7 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         backButton = toolbarItem("‹", "Back") {
-            currentTab()?.webView?.let { if (it.canGoBack()) it.goBack() }
-        }
+            currentTab()?.webView?.let { if (it.canGoBack()) it.goBack() }        }
         forwardButton = toolbarItem("›", "Forward") {
             currentTab()?.webView?.let { if (it.canGoForward()) it.goForward() }
         }
@@ -254,8 +324,249 @@ class MainActivity : Activity() {
         ))
 
         setContentView(root)
+        agentEngine = AgentActionEngine(
+            webView = { currentTab()?.webView },
+            onStatus = { _ ->
+                runOnUiThread {
+                    if (::agentButton.isInitialized) agentButton.text =
+                        if (agentEngine?.isRunning() == true) "••" else "AI"
+                }
+            },
+            onFinished = { success, summary ->
+                runOnUiThread {
+                    if (::agentButton.isInitialized) agentButton.text = "AI"
+                    AlertDialog.Builder(this)
+                        .setTitle(if (success) "Task verified" else "Task stopped")
+                        .setMessage(summary)
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        )
         createTab(null, true)
         refreshToolbar()
+    }
+
+    private fun submitAgentTask(task: String) {
+        val endpoint = getSharedPreferences("nova_browser", MODE_PRIVATE)
+            .getString("agent_planner_endpoint", "").orEmpty().trim()
+        if (endpoint.isBlank()) {
+            Toast.makeText(
+                this,
+                "Running basic URL/search mode. Tap AI to configure an HTTPS planner for multi-step AI tasks.",
+                Toast.LENGTH_LONG
+            ).show()
+            val plan = runCatching { AgentPlanner.localPlan(task) }.getOrElse {
+                Toast.makeText(this, it.message ?: "Could not plan task", Toast.LENGTH_LONG).show()
+                return
+            }
+            agentEngine?.execute(plan)
+            return
+        }
+
+        if (!endpoint.startsWith("https://", true)) {
+            Toast.makeText(this, "Planner endpoint must use HTTPS. Configure it from AI settings.", Toast.LENGTH_LONG).show()
+            return
+        }
+        agentButton.text = "…"
+        Toast.makeText(this, "AI is planning your browser task…", Toast.LENGTH_SHORT).show()
+        val tab = currentTab()
+        AgentPlanner.requestPlan(
+            endpoint = endpoint,
+            task = task,
+            currentUrl = tab?.url.orEmpty(),
+            pageTitle = tab?.title.orEmpty()
+        ) { result ->
+            runOnUiThread {
+                agentButton.text = "AI"
+                result.onSuccess { plan ->
+                    val steps = plan.optJSONArray("steps")
+                    val summary = buildString {
+                        append("Task: ").append(task.take(250)).append("\n\n")
+                        if (steps == null || steps.length() == 0) append("No steps returned")
+                        else for (i in 0 until steps.length()) {
+                            val step = steps.optJSONObject(i) ?: continue
+                            append(i + 1).append(". ").append(step.optString("action", "unknown"))
+                            when (step.optString("action")) {
+                                "navigate" -> append("\n   URL: ").append(step.optString("url").take(160))
+                                "search" -> append("\n   Query: ").append(step.optString("query").take(160))
+                                "click", "type", "scroll", "extract", "wait_for", "press_enter", "submit" ->
+                                    append("\n   Target: ").append(step.optString("selector").take(120))
+                                else -> Unit
+                            }
+                            if (step.optString("action") == "type") {
+                                append("\n   Text: ").append(step.optString("text").take(100))
+                            }
+                            append("\n\n")
+                        }
+                        val verification = plan.optJSONObject("verification")
+                        if (verification != null) {
+                            append("Verification: ").append(verification.optString("selector"))
+                            listOf("textContains", "urlContains", "titleContains").forEach { key ->
+                                val value = verification.optString(key)
+                                if (value.isNotBlank()) append("\n").append(key).append(": ").append(value.take(120))
+                            }
+                        }
+                    }
+                    AlertDialog.Builder(this)
+                        .setTitle("Review AI plan")
+                        .setMessage(summary)
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Execute") { _, _ -> agentEngine?.execute(plan) }
+                        .show()
+                }.onFailure { error ->
+                    AlertDialog.Builder(this)
+                        .setTitle("AI planner unavailable")
+                        .setMessage(error.message ?: "Could not create a plan")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        }
+    }
+
+    private fun showAgentDialog() {
+        val prefs = getSharedPreferences("nova_browser", MODE_PRIVATE)
+        val taskInput = EditText(this).apply {
+            hint = "Example: search for Android WebView security"
+            setTextColor(primaryText)
+            setHintTextColor(mutedText)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(inputBg, 12)
+            minLines = 2
+        }
+        val endpointInput = EditText(this).apply {
+            hint = "Optional HTTPS AI planner endpoint"
+            setText(prefs.getString("agent_planner_endpoint", "").orEmpty())
+            setTextColor(primaryText)
+            setHintTextColor(mutedText)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(inputBg, 12)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(taskInput, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(TextView(this@MainActivity).apply {
+                text = "Task instructions"
+                textSize = 11f
+                setTextColor(mutedText)
+                setPadding(dp(2), dp(8), dp(2), dp(4))
+            })
+            addView(endpointInput, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(TextView(this@MainActivity).apply {
+                text = "Leave endpoint blank for local URL/search mode. Add an HTTPS planner-proxy URL for AI-generated multi-step plans. Keep model API keys on the server, not in this app."
+                textSize = 12f
+                setTextColor(mutedText)
+                setPadding(dp(2), dp(10), dp(2), dp(4))
+            })
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Run browser task")
+            .setView(panel)
+            .setPositiveButton("Run", null)
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Stop", null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val task = taskInput.text.toString().trim()
+                        val endpoint = endpointInput.text.toString().trim()
+                        if (task.isBlank()) {
+                            taskInput.error = "Enter a task"
+                            return@setOnClickListener
+                        }
+                        if (endpoint.isNotBlank() && !endpoint.startsWith("https://", true)) {
+                            endpointInput.error = "Planner endpoint must use HTTPS"
+                            return@setOnClickListener
+                        }
+                        prefs.edit().putString("agent_planner_endpoint", endpoint).apply()
+                        dialog.dismiss()
+                        if (endpoint.isBlank()) {
+                            val plan = runCatching { AgentPlanner.localPlan(task) }.getOrElse {
+                                Toast.makeText(this, it.message ?: "Could not plan task", Toast.LENGTH_LONG).show()
+                                return@setOnClickListener
+                            }
+                            Toast.makeText(this, "Running local task plan", Toast.LENGTH_SHORT).show()
+                            agentEngine?.execute(plan)
+                        } else {
+                            agentButton.text = "…"
+                            Toast.makeText(this, "Asking planner to create a task plan…", Toast.LENGTH_SHORT).show()
+                            val tab = currentTab()
+                            AgentPlanner.requestPlan(
+                                endpoint = endpoint,
+                                task = task,
+                                currentUrl = tab?.url.orEmpty(),
+                                pageTitle = tab?.title.orEmpty()
+                            ) { result ->
+                                runOnUiThread {
+                                    agentButton.text = "AI"
+                                    result.onSuccess { plan ->
+                                        AlertDialog.Builder(this)
+                                            .setTitle("Review AI plan")
+                                            .setMessage(buildString {
+                                                val steps = plan.optJSONArray("steps")
+                                                if (steps == null || steps.length() == 0) {
+                                                    append("No steps returned")
+                                                } else {
+                                                    for (i in 0 until steps.length()) {
+                                                        val step = steps.optJSONObject(i) ?: continue
+                                                        val action = step.optString("action", "unknown action")
+                                                        append("${i + 1}. $action")
+                                                        when (action) {
+                                                            "navigate" -> append("\n   URL: ${step.optString("url").take(180)}")
+                                                            "search" -> append("\n   Query: ${step.optString("query").take(180)}")
+                                                            "click", "scroll", "extract", "wait_for", "press_enter", "submit" ->
+                                                                append("\n   Target: ${step.optString("selector").take(140)}")
+                                                            "type" -> {
+                                                                append("\n   Target: ${step.optString("selector").take(140)}")
+                                                                append("\n   Text: ${step.optString("text").take(140)}")
+                                                            }
+                                                            "wait" -> append("\n   Delay: ${step.optLong("milliseconds", 500L)} ms")
+                                                            else -> Unit
+                                                        }
+                                                        if (action == "wait_for") {
+                                                            append("\n   Timeout: ${step.optLong("timeoutMs", 10_000L)} ms")
+                                                        }
+                                                        append("\n\n")
+                                                    }
+                                                }
+                                                val verification = plan.optJSONObject("verification")
+                                                if (verification != null) {
+                                                    append("Final verification")
+                                                    append("\n   Element: ${verification.optString("selector").take(140)}")
+                                                    listOf("textContains", "urlContains", "titleContains").forEach { field ->
+                                                        val expected = verification.optString(field)
+                                                        if (expected.isNotBlank()) append("\n   $field: ${expected.take(140)}")
+                                                    }
+                                                }
+                                            })
+                                            .setNegativeButton("Cancel", null)
+                                            .setPositiveButton("Execute") { _, _ -> agentEngine?.execute(plan) }
+                                            .show()
+                                    }.onFailure { error ->
+                                        AlertDialog.Builder(this)
+                                            .setTitle("Planner error")
+                                            .setMessage(error.message ?: "Could not create a plan")
+                                            .setPositiveButton("OK", null)
+                                            .show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                        agentEngine?.cancel()
+                        dialog.dismiss()
+                    }
+                }
+                dialog.show()
+            }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
